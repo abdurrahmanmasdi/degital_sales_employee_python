@@ -11,8 +11,19 @@ from app.db.session import AsyncSessionLocal
 from app.services.ai_client import generate_sales_reply
 from app.services.whatsapp_client import send_whatsapp_text
 
+from app.db.redis import redis_client
+
 # Set up a logger for the service
 logger = logging.getLogger(__name__)
+
+# --- Helper Function for Formatting ---
+def format_message_for_redis(msg: Message, sender_type: str):
+    return {
+        "id": str(msg.id),
+        "content": msg.content,
+        "sender": sender_type, # e.g., "USER" or "AI"
+        "createdAt": msg.created_at.isoformat()
+    }
 
 async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Organization):
     """
@@ -22,12 +33,12 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         phone_number_id = payload.entry[0].changes[0].value.metadata.phone_number_id
         msg_data = payload.entry[0].changes[0].value.messages[0]
         patient_phone = msg_data.from_number
-        user_text = msg_data.text.body if msg_data.text else ""
+        lead_text = msg_data.text.body if msg_data.text else ""
     except (IndexError, AttributeError):
         logger.debug("Received payload that is not a text message. Ignoring.")
         return
 
-    if not user_text:
+    if not lead_text:
         return
 
     async with AsyncSessionLocal() as db:
@@ -50,14 +61,20 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
             db.add(conversation)
             await db.flush() 
 
-        # 2. Save the User's Message
-        user_message = Message(
+        # 2. Save the Lead's Message
+        lead_message = Message(
             conversation_id=conversation.id,
-            type=MessageTypeEnum.USER_TEXT,
-            content=user_text
+            type=MessageTypeEnum.LEAD_TEXT,
+            content=lead_text
         )
-        db.add(user_message)
+        db.add(lead_message)
         await db.commit() 
+
+        await redis_client.publish_chat_event(
+            organization_id=tenant.id,
+            conversation_id=conversation.id,
+            message=format_message_for_redis(lead_message, "USER")
+        )
 
         # 3. Fetch the AI Persona for this Tenant
         persona_query = select(OrganizationAiPersona).where(
@@ -83,18 +100,19 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         # Reverse to chronological order
         recent_messages.reverse()
         
-        chat_history_str = ""
-        for m in recent_messages:
-            speaker = "Patient" if m.type == MessageTypeEnum.USER_TEXT else "AI"
-            chat_history_str += f"{speaker}: {m.content}\n"
+        chat_history_str = "\n".join([
+            f"{'Patient' if m.type == MessageTypeEnum.LEAD_TEXT else 'AI'}: {m.content}"
+            for m in recent_messages
+        ])
 
         # 5. Generate the AI Reply
         logger.info(f"Generating AI reply for {patient_phone} using tenant persona...")
         ai_reply_text = await generate_sales_reply(
             chat_history=chat_history_str,
-            user_message=user_text,
+            user_message=lead_text,
             system_prompt=system_prompt
         )
+        
 
         # 6. Save the AI's Reply
         ai_message = Message(
@@ -104,6 +122,12 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         )
         db.add(ai_message)
         await db.commit()
+
+        await redis_client.publish_chat_event(
+            organization_id=tenant.id,
+            conversation_id=conversation.id,
+            message=format_message_for_redis(ai_message, "AI")
+        )
         
         logger.info(f"✅ Successfully processed and saved AI reply for {patient_phone}")
 

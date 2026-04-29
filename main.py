@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from app.api.routes import webhook
 from app.core.config import settings
+from contextlib import asynccontextmanager
+from app.db.redis import redis_client
 
 def create_app() -> FastAPI:
     """
@@ -14,6 +16,15 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc"
     )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # --- Startup ---
+        await redis_client.connect()
+        yield
+        # --- Shutdown ---
+        await redis_client.disconnect()
+    app = FastAPI(lifespan=lifespan)
 
     # Mount our v1 API routes
     app.include_router(webhook.router, prefix="/api/v1")

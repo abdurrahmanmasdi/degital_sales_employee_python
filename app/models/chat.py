@@ -10,6 +10,8 @@ class HandledByEnum(str, enum.Enum):
     HUMAN = "HUMAN"
 
 class MessageTypeEnum(str, enum.Enum):
+    LEAD_TEXT = "LEAD_TEXT"
+    LEAD_AUDIO = "LEAD_AUDIO"
     USER_TEXT = "USER_TEXT"
     USER_AUDIO = "USER_AUDIO"
     AI_TEXT = "AI_TEXT"
