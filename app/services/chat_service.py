@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.organization import Organization, OrganizationAiPersona
-from app.models.chat import Conversation, Message, MessageTypeEnum, HandledByEnum
+from app.models.chat import Conversation, Message, MessageType, ActiveHandler
 from app.schemas.webhook import WhatsAppWebhookPayload
 from app.db.session import AsyncSessionLocal
 from app.services.whatsapp_client import send_whatsapp_text
@@ -44,30 +44,33 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         # 1. Find or Create the Conversation
         conv_query = select(Conversation).where(
             Conversation.organization_id == tenant.id,
-            Conversation.name == patient_phone
+            Conversation.external_contact_id == patient_phone
         )
         result = await db.execute(conv_query)
         conversation = result.scalar_one_or_none()
 
+        # If it doesn't exist, create it with the correct schema columns
         if not conversation:
-            logger.info(f"Creating new conversation for {patient_phone}")
+            logger.info(f"Creating new conversation for external contact: {patient_phone}")
             conversation = Conversation(
                 organization_id=tenant.id,
-                name=patient_phone,
-                handled_by=HandledByEnum.AI
+                name=patient_phone,                 # Can be updated later to their actual name by NestJS
+                external_contact_id=patient_phone,  # CRITICAL: Links to the Meta WhatsApp ID
+                handled_by=ActiveHandler.AI
             )
             db.add(conversation)
-            await db.flush() 
+            await db.flush()
 
         # --- HUMAN TAKEOVER CHECK ---
-        if conversation.handled_by == HandledByEnum.HUMAN:
+        if conversation.handled_by == ActiveHandler.HUMAN:  # Updated Enum
             logger.info(f"Conversation {conversation.id} is handled by HUMAN. AI sleeping.")
             # We still save the lead's message and publish to Redis so the Human sees it!
             lead_message = Message(
-                conversation_id=conversation.id, type=MessageTypeEnum.LEAD_TEXT, content=lead_text
+                conversation_id=conversation.id, type=MessageType.LEAD_TEXT, content=lead_text # Updated Enum
             )
             db.add(lead_message)
             await db.commit()
+
             await redis_client.publish_chat_event(
                 organization_id=tenant.id, conversation_id=conversation.id, message=format_message_for_redis(lead_message, "USER")
             )
@@ -76,11 +79,11 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         # 2. Save the Lead's Message
         lead_message = Message(
             conversation_id=conversation.id,
-            type=MessageTypeEnum.LEAD_TEXT,
+            type=MessageType.LEAD_TEXT, # Updated Enum
             content=lead_text
         )
         db.add(lead_message)
-        await db.commit() 
+        await db.commit()
 
         await redis_client.publish_chat_event(
             organization_id=tenant.id,
@@ -101,17 +104,18 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         history_query = select(Message).where(
             Message.conversation_id == conversation.id
         ).order_by(Message.created_at.desc()).limit(15) # Grab last 15 messages for good context
+        
         history_result = await db.execute(history_query)
         recent_messages = list(history_result.scalars().all())
         recent_messages.reverse() # Reverse to chronological order
         
         chat_history_str = "\n".join([
-            f"{'Patient' if m.type in [MessageTypeEnum.LEAD_TEXT, MessageTypeEnum.LEAD_AUDIO] else 'AI/Clinic'}: {m.content}"
+            f"{'Patient' if m.type in [MessageType.LEAD_TEXT, MessageType.LEAD_AUDIO] else 'AI/Clinic'}: {m.content}"
             for m in recent_messages
         ])
 
         # ==========================================
-        # 🧠 THE SCALABLE AGENT
+        #   THE SCALABLE AGENT
         # ==========================================
         logger.info(f"Generating AI reply for {patient_phone} using Agent...")
         
@@ -126,11 +130,11 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         )
 
         # ==========================================
-        # 💾 SAVE & SEND
+        #   SAVE & SEND
         # ==========================================
         ai_message = Message(
             conversation_id=conversation.id,
-            type=MessageTypeEnum.AI_TEXT,
+            type=MessageType.AI_TEXT, # Updated Enum
             content=ai_reply_text
         )
         db.add(ai_message)
@@ -142,7 +146,7 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
             message=format_message_for_redis(ai_message, "AI")
         )
         
-        logger.info(f"✅ Successfully processed AI reply for {patient_phone}")
+        logger.info(f"  Successfully processed AI reply for {patient_phone}")
 
         await send_whatsapp_text(
             to_phone=patient_phone,

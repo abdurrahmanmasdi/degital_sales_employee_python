@@ -11,6 +11,7 @@ class Organization(Base):
     
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, index=True)
+    whatsapp_phone_number_id = Column(String(255), nullable=True, unique=True, index=True)
     
     # Relationships
     ai_personas = relationship("OrganizationAiPersona", back_populates="organization", cascade="all, delete-orphan")
