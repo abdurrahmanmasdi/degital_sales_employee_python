@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routes import webhook
+from app.api.routes import webhook, knowledge
 from app.core.config import settings
 from contextlib import asynccontextmanager
 from app.db.redis import redis_client
@@ -28,7 +28,8 @@ def create_app() -> FastAPI:
 
     # Mount our v1 API routes
     app.include_router(webhook.router, prefix="/api/v1")
-
+    app.include_router(knowledge.router, prefix="/api/v1")
+    
     @app.get("/health", tags=["System"])
     async def health_check():
         return {

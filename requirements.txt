@@ -6,3 +6,6 @@ greenlet
 asyncpg
 google-genai
 pydantic-settings
+pgvector
+python-multipart
+pypdf

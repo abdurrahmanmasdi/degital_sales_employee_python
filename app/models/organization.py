@@ -1,7 +1,10 @@
 import uuid
-from sqlalchemy import Column, String, Text, ForeignKey, Uuid
+from datetime import datetime
+from sqlalchemy import Column, String, Text, DateTime, text, ForeignKey, Uuid
 from sqlalchemy.orm import relationship
 from app.db.base import Base
+from sqlalchemy.dialects.postgresql import UUID
+from pgvector.sqlalchemy import Vector
 
 class Organization(Base):
     __tablename__ = "organizations"
@@ -12,6 +15,20 @@ class Organization(Base):
     # Relationships
     ai_personas = relationship("OrganizationAiPersona", back_populates="organization", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="organization", cascade="all, delete-orphan")
+
+
+class KnowledgeBase(Base):
+    __tablename__ = "organization_knowledge"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+    embedding = Column(Vector(768)) 
+
+    # Use datetime.utcnow as the Python-level default
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class OrganizationAiPersona(Base):
