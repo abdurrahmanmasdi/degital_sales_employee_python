@@ -9,3 +9,4 @@ pydantic-settings
 pgvector
 python-multipart
 pypdf
+phonenumbers==8.13.31

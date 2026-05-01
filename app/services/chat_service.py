@@ -9,8 +9,6 @@ from app.schemas.webhook import WhatsAppWebhookPayload
 from app.db.session import AsyncSessionLocal
 from app.services.whatsapp_client import send_whatsapp_text
 from app.db.redis import redis_client
-
-# Import our scalable Agent Class
 from app.ai.agent import ClinicSalesAgent
 
 logger = logging.getLogger(__name__)
@@ -119,9 +117,13 @@ async def process_whatsapp_message(payload: WhatsAppWebhookPayload, tenant: Orga
         # ==========================================
         logger.info(f"Generating AI reply for {patient_phone} using Agent...")
         
+        current_lead_id = str(conversation.lead_id) if conversation.lead_id else None
+        
         agent = ClinicSalesAgent(
             organization_id=str(tenant.id),
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
+            patient_phone=patient_phone,
+            lead_id=current_lead_id
         )
 
         ai_reply_text = await agent.generate_response(

@@ -8,9 +8,6 @@ from app.core.exceptions import TenantNotFoundError
 
 db_dependency = Depends(get_db)
 
-import logging
-logger = logging.getLogger(__name__)
-
 async def get_current_tenant(
     payload: WhatsAppWebhookPayload, 
     db: AsyncSession = db_dependency
@@ -22,7 +19,6 @@ async def get_current_tenant(
     try:
         # Extract the exact clinic's Meta Phone ID from the webhook
         phone_number_id = payload.entry[0].changes[0].value.metadata.phone_number_id
-        logger.debug(f"Processing message for phone number ID: {phone_number_id}")
     except (IndexError, AttributeError):
         # Ignore non-message webhooks (like read receipts) gracefully
         raise TenantNotFoundError(phone_number="UNKNOWN_PAYLOAD_STRUCTURE")
